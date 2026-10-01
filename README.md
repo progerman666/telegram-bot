@@ -19,4 +19,3 @@ Python, python-telegram-bot, PythonAnywhere, Git, GitHub
 
 ## Ссылка на код
 https://github.com/progerman666/telegram-bot
-![Скриншот бота](имя_файла.png)
