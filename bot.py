@@ -1,20 +1,5 @@
 import os
-
-# Создаём папку output
-os.makedirs("./output", exist_ok=True)
-
-# ============ bot.py ============
-bot_py = '''"""
-Telegram-бот для приёма заявок с сохранением в базу данных.
-Портфолио-кейс: Python + python-telegram-bot + SQLite + логирование.
-
-Как запустить:
-1. pip install -r requirements.txt
-2. Получи токен у @BotFather в Telegram
-3. Запусти: python bot.py
-"""
-
-import os
+import csv
 import logging
 import sqlite3
 from datetime import datetime
@@ -29,27 +14,23 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ---------- Настройка ----------
-# Токен берём из переменной окружения (безопаснее, чем в коде)
-TOKEN = os.getenv("BOT_TOKEN", "")
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+MAX_TEXT_LEN = 500
 
-# ---------- Логирование ----------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# ---------- База данных ----------
 DB_NAME = "requests.db"
 
 
 def init_db():
-    """Создаёт таблицу заявок, если её нет."""
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -57,14 +38,12 @@ def init_db():
             text TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
-        """
-    )
+    """)
     conn.commit()
     conn.close()
 
 
 def save_request(user_id, username, text):
-    """Сохраняет заявку в базу."""
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
     cur.execute(
@@ -76,7 +55,6 @@ def save_request(user_id, username, text):
 
 
 def get_requests(user_id):
-    """Возвращает все заявки пользователя."""
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
     cur.execute(
@@ -88,95 +66,176 @@ def get_requests(user_id):
     return rows
 
 
-# ---------- Клавиатура ----------
+def get_all_requests():
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, user_id, username, text, created_at FROM requests ORDER BY id DESC"
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def export_to_csv():
+    rows = get_all_requests()
+    filename = f"requests_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    with open(filename, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["ID", "User ID", "Username", "Текст", "Дата"])
+        writer.writerows(rows)
+    return filename
+
+
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [["📝 Оставить заявку", "📋 Мои заявки"]],
     resize_keyboard=True,
 )
 
-# ---------- Состояния диалога ----------
+ADMIN_KEYBOARD = ReplyKeyboardMarkup(
+    [["📝 Оставить заявку", "📋 Мои заявки"],
+     ["📊 Все заявки", "📥 Скачать CSV"]],
+    resize_keyboard=True,
+)
+
+
+def get_keyboard(user_id):
+    return ADMIN_KEYBOARD if user_id == ADMIN_ID else MAIN_KEYBOARD
+
+
 ASKING_TEXT = 1
 
 
-# ---------- Обработчики ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start."""
+    user = update.effective_user
     await update.message.reply_text(
-        "Привет! Я бот для приёма заявок. 🤖\\n"
+        f"Привет, {user.first_name}! Я бот для приёма заявок. 🤖\n"
         "Выберите действие на клавиатуре:",
-        reply_markup=MAIN_KEYBOARD,
+        reply_markup=get_keyboard(user.id),
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /help."""
+    user = update.effective_user
     await update.message.reply_text(
-        "Я умею:\\n"
-        "/start - начать работу\\n"
-        "/help - эта справка\\n"
-        "/cancel - отменить ввод\\n\\n"
+        "Я умею:\n"
+        "/start - начать работу\n"
+        "/help - эта справка\n"
+        "/cancel - отменить ввод\n\n"
         "Нажмите «📝 Оставить заявку», чтобы отправить заявку.",
-        reply_markup=MAIN_KEYBOARD,
+        reply_markup=get_keyboard(user.id),
     )
 
 
 async def ask_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начинает диалог: просит ввести текст заявки."""
     await update.message.reply_text(
-        "Напишите текст вашей заявки. Например:\\n"
-        "«Нужен сайт-визитка для кофейни»\\n\\n"
+        f"Напишите текст вашей заявки (до {MAX_TEXT_LEN} символов). Например:\n"
+        "«Нужен сайт-визитка для кофейни»\n\n"
         "Для отмены нажмите /cancel"
     )
     return ASKING_TEXT
 
 
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получает текст заявки и сохраняет в базу."""
     user = update.effective_user
     text = update.message.text
+
+    if len(text) > MAX_TEXT_LEN:
+        await update.message.reply_text(
+            f"❌ Слишком длинный текст! Максимум {MAX_TEXT_LEN} символов.\n"
+            f"Сейчас: {len(text)}. Попробуйте ещё раз.",
+            reply_markup=get_keyboard(user.id),
+        )
+        return ASKING_TEXT
 
     save_request(user.id, user.username, text)
     logger.info("Заявка сохранена от user_id=%s", user.id)
 
     await update.message.reply_text(
         "✅ Заявка принята! Мы свяжемся с вами.",
-        reply_markup=MAIN_KEYBOARD,
+        reply_markup=get_keyboard(user.id),
     )
+
+    if ADMIN_ID and user.id != ADMIN_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🔔 Новая заявка\n"
+                     f"От: @{user.username or 'нет username'} (id={user.id})\n"
+                     f"Текст: {text}",
+            )
+        except Exception as e:
+            logger.error("Не удалось уведомить админа: %s", e)
+
     return ConversationHandler.END
 
 
 async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает все заявки пользователя."""
     user = update.effective_user
     rows = get_requests(user.id)
 
     if not rows:
         await update.message.reply_text(
             "У вас пока нет заявок. Нажмите «📝 Оставить заявку».",
-            reply_markup=MAIN_KEYBOARD,
+            reply_markup=get_keyboard(user.id),
         )
         return
 
     lines = []
     for rid, text, created in rows:
-        lines.append(f"#{rid} ({created[:10]})\\n{text}")
+        lines.append(f"#{rid} ({created[:10]})\n{text}")
     await update.message.reply_text(
-        "📋 Ваши заявки:\\n\\n" + "\\n\\n".join(lines),
-        reply_markup=MAIN_KEYBOARD,
+        "📋 Ваши заявки:\n\n" + "\n\n".join(lines),
+        reply_markup=get_keyboard(user.id),
     )
 
 
+async def admin_all_requests(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ У вас нет доступа к этой функции.")
+        return
+
+    rows = get_all_requests()
+    if not rows:
+        await update.message.reply_text("Заявок пока нет.", reply_markup=ADMIN_KEYBOARD)
+        return
+
+    lines = []
+    for rid, uid, uname, text, created in rows:
+        lines.append(f"#{rid} | @{uname or 'нет'} (id={uid}) | {created[:10]}\n{text}")
+    await update.message.reply_text(
+        "📊 Все заявки:\n\n" + "\n\n".join(lines[:20]),
+        reply_markup=ADMIN_KEYBOARD,
+    )
+
+
+async def admin_export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ У вас нет доступа к этой функции.")
+        return
+
+    filename = export_to_csv()
+    with open(filename, "rb") as f:
+        await update.message.reply_document(
+            document=f,
+            filename=filename,
+            caption="📥 Все заявки в CSV",
+        )
+    os.remove(filename)
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет диалог."""
+    user = update.effective_user
     await update.message.reply_text(
         "Отменено. Выберите действие.",
-        reply_markup=MAIN_KEYBOARD,
+        reply_markup=get_keyboard(user.id),
     )
     return ConversationHandler.END
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает ошибки, чтобы бот не падал."""
     logger.error("Ошибка: %s", context.error)
     if update and update.effective_message:
         await update.effective_message.reply_text(
@@ -184,12 +243,16 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ---------- Запуск ----------
 def main():
     if not TOKEN:
         raise ValueError(
-            "Не задан токен! Установите переменную окружения BOT_TOKEN "
-            "или впишите токен в код."
+            "Не задан токен! Установите переменную окружения BOT_TOKEN.\n"
+            "Пример: export BOT_TOKEN='ваш_токен'"
+        )
+    if not ADMIN_ID:
+        logger.warning(
+            "ADMIN_ID не задан. Админ-функции будут недоступны. "
+            "Установите переменную окружения ADMIN_ID."
         )
 
     init_db()
@@ -197,7 +260,6 @@ def main():
 
     app = Application.builder().token(TOKEN).build()
 
-    # Диалог приёма заявки
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Text("📝 Оставить заявку"), ask_text),
@@ -212,6 +274,8 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.Text("📋 Мои заявки"), list_requests))
+    app.add_handler(MessageHandler(filters.Text("📊 Все заявки"), admin_all_requests))
+    app.add_handler(MessageHandler(filters.Text("📥 Скачать CSV"), admin_export_csv))
     app.add_error_handler(error_handler)
 
     logger.info("Бот запущен!")
@@ -220,85 +284,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
-
-# ============ requirements.txt ============
-requirements = """python-telegram-bot==21.6
-"""
-
-# ============ README.md ============
-readme = """# Telegram-бот для приёма заявок 🤖
-
-Бот принимает заявки от пользователей и сохраняет их в базу данных SQLite.
-Готовый кейс для портфолио: Python + python-telegram-bot + SQLite + логирование.
-
-## Возможности
-- 📝 Приём заявок через диалог с пользователем
-- 📋 Просмотр своих заявок
-- 💾 Сохранение данных в базу SQLite
-- 🛡 Обработка ошибок и логирование
-- ⌨️ Удобное меню с кнопками
-
-## Стек
-- Python 3.10+
-- python-telegram-bot 21.x
-- SQLite (встроенная база данных)
-- logging (логирование)
-
-## Как запустить
-
-1. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Получите токен у [@BotFather](https://t.me/BotFather) в Telegram.
-
-3. Задайте токен переменной окружения:
-   ```bash
-   # Windows (PowerShell)
-   $env:BOT_TOKEN="ваш_токен"
-
-   # Linux / macOS
-   export BOT_TOKEN="ваш_токен"
-   ```
-
-4. Запустите бота:
-   ```bash
-   python bot.py
-   ```
-
-## Структура проекта
-```
-telegram-bot/
-├── bot.py            # основной код бота
-├── requirements.txt  # зависимости
-└── requests.db       # база данных (создаётся автоматически)
-```
-
-## Скриншот работы
-![Скриншот бота](screenshot.png)
-
-## Автор
-[GitHub](https://github.com/progerman666)
-"""
-
-# ============ Сохраняем файлы ============
-with open("./output/bot.py", "w", encoding="utf-8") as f:
-    f.write(bot_py)
-with open("./output/requirements.txt", "w", encoding="utf-8") as f:
-    f.write(requirements)
-with open("./output/README.md", "w", encoding="utf-8") as f:
-    f.write(readme)
-
-print("Файлы созданы:")
-for fn in ["bot.py", "requirements.txt", "README.md"]:
-    print("  • output/" + fn)
-
-# Проверка синтаксиса
-import ast
-try:
-    ast.parse(bot_py)
-    print("\\n✅ Синтаксис bot.py корректен")
-except SyntaxError as e:
-    print("\\n❌ Ошибка синтаксиса:", e)
+    
