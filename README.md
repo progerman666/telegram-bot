@@ -1,7 +1,4 @@
-import os
-os.makedirs("./output", exist_ok=True)
-
-readme = """# 🤖 Telegram-бот для приёма заявок
+# 🤖 Telegram-бот для приёма заявок
 
 Портфолио-кейс: **Python + python-telegram-bot + SQLite + логирование**.
 
@@ -24,63 +21,3 @@ readme = """# 🤖 Telegram-бот для приёма заявок
 ### 1. Установите зависимости
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Получите токен у @BotFather
-1. Откройте [@BotFather](https://t.me/BotFather) в Telegram
-2. Отправьте `/newbot`
-3. Скопируйте полученный токен
-
-### 3. Задайте переменные окружения
-```bash
-export BOT_TOKEN='ваш_токен'
-export ADMIN_ID='ваш_telegram_id'
-```
-
-> 💡 Узнать свой Telegram ID можно у бота [@userinfobot](https://t.me/userinfobot).
-
-### 4. Запустите бота
-```bash
-python bot.py
-```
-
-## 🎛️ Команды
-
-| Команда | Описание |
-|---------|----------|
-| `/start` | Начать работу |
-| `/help` | Справка |
-| `/cancel` | Отменить ввод |
-
-## 👑 Функции админа
-
-Если указан `ADMIN_ID`, доступны дополнительные кнопки:
-- **📊 Все заявки** — просмотр заявок всех пользователей
-- **📥 Скачать CSV** — выгрузка всех заявок в CSV
-
-## 🗂️ Структура проекта
-
-```
-├── bot.py            # Основной код бота
-├── requirements.txt  # Зависимости
-├── Procfile          # Для облачного деплоя
-├── runtime.txt       # Версия Python
-└── README.md         # Этот файл
-```
-
-## 🛠️ Технологии
-
-- **Python 3.11**
-- **python-telegram-bot 21.x**
-- **SQLite** (встроенная БД)
-
-## 📄 Лицензия
-
-MIT
-"""
-
-with open("./output/README.md", "w", encoding="utf-8") as f:
-    f.write(readme)
-
-print("✅ README.md обновлён и сохранён в output")
-print("Размер:", os.path.getsize("./output/README.md"), "байт")
