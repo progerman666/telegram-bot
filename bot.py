@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime
 
 from dotenv import load_dotenv
+from ai_summary import summarize_applications
+
 load_dotenv()  # Загружаем переменные из файла .env
 
 from telegram import Update, ReplyKeyboardMarkup
@@ -79,6 +81,18 @@ def get_all_requests():
     conn.close()
     return rows
 
+def get_today_requests():
+    """Возвращает заявки за сегодня."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT username, text FROM requests WHERE created_at LIKE ? ORDER BY id",
+        (today + "%",),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
 
 def export_to_csv():
     rows = get_all_requests()
@@ -228,6 +242,33 @@ async def admin_export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     os.remove(filename)
 
+async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ У вас нет доступа к этой функции.")
+        return
+
+    rows = get_today_requests()
+    if not rows:
+        await update.message.reply_text(
+            "Сегодня заявок пока нет.", reply_markup=ADMIN_KEYBOARD
+        )
+        return
+
+    text = "\n".join(f"- @{uname or 'нет'}: {req_text}" for uname, req_text in rows)
+    await update.message.reply_text("⏳ Готовлю сводку...", reply_markup=ADMIN_KEYBOARD)
+
+    try:
+        summary = summarize_applications(text)
+        await update.message.reply_text(
+            f"📊 Сводка за сегодня:\n\n{summary}", reply_markup=ADMIN_KEYBOARD
+        )
+    except Exception as e:
+        logger.error("Ошибка ИИ-сводки: %s", e)
+        await update.message.reply_text(
+            "❌ Не удалось получить сводку. Проверьте OPENAI_API_KEY.",
+            reply_markup=ADMIN_KEYBOARD,
+        )
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -275,6 +316,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("summary", summary_command))
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.Text("📋 Мои заявки"), list_requests))
     app.add_handler(MessageHandler(filters.Text("📊 Все заявки"), admin_all_requests))
