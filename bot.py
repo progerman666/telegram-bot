@@ -28,6 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+logger.info("BOT_TOKEN найден: %s", bool(TOKEN))
 
 DB_NAME = "requests.db"
 
