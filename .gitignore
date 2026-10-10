@@ -1,4 +1,6 @@
 myenv/
 __pycache__/
-*.pyc
 .env
+requests.db
+__pycache__/
+*.pyc
